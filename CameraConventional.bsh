@@ -1,0 +1,8 @@
+mm.getCore().setProperty("Andor-Left", "AD_Converter", "2. 16bit");
+mm.getCore().setProperty("Andor-Left", "Output_Amplifier", "Conventional");
+mm.getCore().setProperty("Andor-Left", "AD_Converter", "1. 14bit");
+mm.getCore().setProperty("Andor-Left", "Trigger", "Software");
+mm.getCore().setProperty("Andor-Back", "AD_Converter", "2. 16bit");
+mm.getCore().setProperty("Andor-Back", "Output_Amplifier", "Conventional");
+mm.getCore().setProperty("Andor-Back", "AD_Converter", "1. 14bit");
+mm.getCore().setProperty("Andor-Back", "Trigger", "Software");

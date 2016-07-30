@@ -1,0 +1,69 @@
+exposure488 = 50.0;
+exposureCy3 = 100.0;
+exposureCy5 = 100.0;
+
+nrTimePoints = 10;
+
+cameraBack = "Andor-Back";
+cameraLeft = "Andor-Left";
+
+/********* NO NEED TO EDIT BELOW THIS LINE *************************/
+
+store = mm.data().createRAMDatastore();
+cb = mm.data().getCoordsBuilder();
+smb = mm.data().getSummaryMetadataBuilder();
+String[] channelNames =  {"488-left", "Cy3", "Cy5"};
+sm = smb.channelGroup("Channels-Stefan").channelNames(channelNames).build();
+store.setSummaryMetadata(sm);
+
+core = mm.getCMMCore();
+
+core.setConfig("Channels-Stefan", "488-left");
+core.waitForConfig("Channels-Stefan", "488-left");
+imgList = mm.acquisitions().snap();
+coord = cb.time(0).channel(0).build();
+img = imgList.get(0).copyAtCoords(coord);
+store.putImage(img);
+
+
+core.setConfig("Channels-Stefan", "Cy3");
+core.waitForConfig("Channels-Stefan", "Cy3");
+
+core.setExposure(cameraBack, exposureCy5);
+core.setExposure(cameraLeft, exposureCy3);
+
+start = System.nanoTime();
+
+for (int i = 0; i < nrTimePoints; i++) {
+	core.setProperty("AOTF", "LaserLine", "561nm");
+	core.setCameraDevice(cameraBack);
+	imgList = mm.acquisitions().snap();
+	t = System.nanoTime();
+	coords = cb.time(i).channel(1).build();
+	elapsed = (t - start) / 1000000.0;
+	metadata = imgList.get(0).getMetadata();
+	metadata = metadata.copy().camera(cameraBack).exposureMs(exposureCy3).elapsedTimeMs(elapsed).build();
+	img = imgList.get(0).copyWith(coords, metadata);
+	store.putImage(img);
+
+	core.setProperty("AOTF", "LaserLine", "640nm");
+	core.setCameraDevice(cameraLeft);
+	imgList = mm.acquisitions().snap();
+	t = System.nanoTime();
+	coords = cb.time(i).channel(2).build();
+	elapsed = (t - start) / 1000000.0;
+	metadata = imgList.get(0).getMetadata();
+	metadata = metadata.copy().camera(cameraLeft).exposureMs(exposureCy5).elapsedTimeMs(elapsed).build();
+	img = imgList.get(0).copyWith(coords, metadata);
+	store.putImage(img);
+}
+
+end = System.nanoTime();
+duration = (end - start) / 1000000.0;
+
+dw = mm.displays().createDisplay(store);
+mm.displays().manage(store);
+
+store.freeze();
+
+mm.scripter().message ("Elapsed time: " + duration + " ms");

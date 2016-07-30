@@ -1,0 +1,135 @@
+exposure488 = 50.0;
+exposureCy3 = 100.0;
+exposureCy5 = 100.0;
+
+nrTimePoints = 100;
+
+cameraBack = "Andor-Back";
+cameraLeft = "Andor-Left";
+
+/********* NO NEED TO EDIT BELOW THIS LINE *************************
+ * Nico Stuurman, 2016
+ * Copyright University of California
+ * BSD v2 license
+ ********************************************************************/
+  
+ import mmcorej.StrVector;
+
+store = mm.data().createRAMDatastore();
+cb = mm.data().getCoordsBuilder();
+smb = mm.data().getSummaryMetadataBuilder();
+String[] channelNames =  {"488-left", "Cy3", "Cy5"};
+sm = smb.channelGroup("Channels-Stefan").channelNames(channelNames).build();
+store.setSummaryMetadata(sm);
+dw = mm.displays().createDisplay(store);
+mm.displays().manage(store);
+
+core = mm.getCMMCore();
+
+core.setConfig("Channels-Stefan", "488-left");
+core.setAutoShutter(true);
+core.waitForConfig("Channels-Stefan", "488-left");
+imgList = mm.acquisitions().snap();
+coord = cb.time(0).channel(0).build();
+img = imgList.get(0).copyAtCoords(coord);
+store.putImage(img);
+
+
+core.setConfig("Channels-Stefan", "Cy3");
+core.waitForConfig("Channels-Stefan", "Cy3");
+
+core.setExposure(cameraBack, exposureCy5);
+core.setExposure(cameraLeft, exposureCy3);
+
+core.setAutoShutter(false);
+core.setShutterOpen(true);
+
+core.setProperty("AOTF", "Sequence", "On");
+StrVector laserLines = new StrVector();
+laserLines.add("561nm");
+laserLines.add("640nm");
+core.loadPropertySequence("AOTF", "LaserLine", laserLines);
+core.startPropertySequence("AOTF", "LaserLine");
+
+core.initializeCircularBuffer();
+
+core.setProperty(cameraBack, "Trigger", "External");
+core.waitForDevice(cameraBack);
+
+/**
+ * We want to get alternating sequences between the two cameras.
+ * We use here a bit of a trick: the left camera is triggering the
+ * back camera.  Since the back camera is lagging a tiny bit, it 
+ * will always be missing the even numbered images that the left
+ * camera takes.  Illumination is such that the odd numbered images
+ * get the Cy3 image (back camera), and the even numbered images the
+ * Cy5 image.  We then only use the even numbered images from the left
+ * camera (and all the images from the back camera).
+ * Funnily enough, this seems to work robustly.
+ * 
+ */
+core.startSequenceAcquisition(cameraBack, nrTimePoints * 2, 0, true);
+core.startSequenceAcquisition(cameraLeft, nrTimePoints * 2, 0, true);
+
+start = System.nanoTime();
+
+done = false;
+cameraBackDone = false;
+cameraLeftDone = false;
+int imageNr = (int) 0;
+int channel = (int) 1;
+
+while (!done) {
+	while (core.getRemainingImageCount() == 0) {
+		Thread.sleep(300);
+	}
+	tImg = core.popNextTaggedImage();
+	img = mm.data().convertTaggedImage(tImg);
+	metadata = img.getMetadata();
+	camera = metadata.getCamera();
+	nr = metadata.getImageNumber();
+	useImage = false;
+	if (camera.equals(cameraBack)) {
+		useImage = true;
+		imageNr = (int) nr;
+		channel = 1;
+		if (nr >= (nrTimePoints - 1) ) {
+			cameraBackDone = true;
+		}
+	}
+	if (camera.equals(cameraLeft)) {
+		if ( (nr % 2) == 1) {
+			useImage = true;
+			imageNr = (int) (nr / 2);
+			channel = 2;
+			if ( nr >= (nrTimePoints * 2) - 1) {
+				cameraLeftDone = true;
+			}
+		}
+	}
+	// mm.scripter().message(" Image says: Camera " + camera + " nr: " + nr);
+	if (useImage) {
+		t = System.nanoTime();
+		coords = cb.time(imageNr).channel(channel).build();
+		elapsed = (double) (t - start) / 1000000.0;
+		metadata = metadata.copy().exposureMs(exposureCy3).elapsedTimeMs(elapsed).build();
+		img = img.copyWith(coords, metadata);
+		store.putImage(img);
+	}
+	done = cameraBackDone && cameraLeftDone;
+	
+}
+
+end = System.nanoTime();
+duration = (end - start) / 1000000.0;
+
+core.setShutterOpen(false);
+core.setAutoShutter(true);
+core.stopPropertySequence("AOTF", "LaserLine");
+core.stopSequenceAcquisition(cameraBack);
+core.stopSequenceAcquisition(cameraLeft);
+core.setProperty(cameraBack, "Trigger", "Software");
+
+store.freeze();
+
+mm.scripter().message ("Elapsed time: " + duration + " ms");
